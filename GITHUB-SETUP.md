@@ -102,6 +102,7 @@ The GitHub build produces an **unsigned** IPA. To install it on iPhone you need 
 |---------|-----|
 | `git push` asks for password | Use a [Personal Access Token](https://github.com/settings/tokens) instead of password |
 | Workflow fails on `pod install` | Re-run the workflow — GitHub macOS runners occasionally need a retry |
+| Workflow fails with exit code 65 | Download **xcodebuild-log** from Artifacts on the failed run and check the last errors |
 | Workflow fails on `expo prebuild` | Check the Actions log; ensure `app.json` / `app.config.ts` is valid |
 | iPhone says "Unable to install" | Sign the IPA with Sideloadly/AltStore using your Apple ID |
 | App stops working after 7 days | Re-sideload with Sideloadly (free Apple ID limit) |

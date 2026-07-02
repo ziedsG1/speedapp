@@ -18,6 +18,16 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     return plugin;
   });
 
+  plugins.push([
+    'expo-build-properties',
+    {
+      ios: {
+        deploymentTarget: '15.1',
+        useFrameworks: 'static',
+      },
+    },
+  ]);
+
   return {
     ...config,
     name: 'SpeedApp',
