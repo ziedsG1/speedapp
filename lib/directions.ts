@@ -263,17 +263,23 @@ export async function generateRunningRoute(
   };
 }
 
-/** Direct A→B walking route (useful for custom endpoints later). */
+/** Walking route on streets from origin to destination. */
 export async function fetchWalkingRoute(
   origin: Coordinate,
   destination: Coordinate,
   via?: Coordinate[]
 ): Promise<RouteResult> {
-  const { coords, distanceM, durationS } = await fetchDirectionsLeg(
-    origin,
-    destination,
-    via
-  );
+  if (!GOOGLE_MAPS_API_KEY) {
+    throw new DirectionsError(
+      'Google Maps API key is missing. Add GOOGLE_MAPS_API_KEY to your app config.'
+    );
+  }
+
+  const { coords, distanceM, durationS } = await fetchDirectionsLeg(origin, destination, via);
+
+  if (coords.length < 2) {
+    throw new DirectionsError('No street route found between these points.');
+  }
 
   return {
     coordinates: coords,

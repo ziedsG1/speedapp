@@ -11,7 +11,6 @@ import { Text } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import {
-  MARATHON_DISTANCES,
   MARATHON_LABELS,
   calculateFinishTime,
   estimateCalories,
@@ -22,17 +21,21 @@ import {
 type Props = {
   onCalculate: (data: {
     marathonType: MarathonType;
-    distanceKm: number;
     paceMinPerKm: number;
-    finishTime: string;
-    splits: ReturnType<typeof generateSplits>;
-    calories: number;
   }) => void;
   userAge?: number;
   loading?: boolean;
+  destinationSelected?: boolean;
+  plannedDistanceKm?: number | null;
 };
 
-export default function MarathonCalculator({ onCalculate, userAge, loading = false }: Props) {
+export default function MarathonCalculator({
+  onCalculate,
+  userAge,
+  loading = false,
+  destinationSelected = false,
+  plannedDistanceKm = null,
+}: Props) {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = Colors[colorScheme];
 
@@ -40,46 +43,40 @@ export default function MarathonCalculator({ onCalculate, userAge, loading = fal
   const [paceMinutes, setPaceMinutes] = useState('5');
   const [paceSeconds, setPaceSeconds] = useState('30');
 
-  const distanceKm = MARATHON_DISTANCES[marathonType];
-
   const paceMinPerKm = useMemo(() => {
     const mins = parseInt(paceMinutes, 10) || 0;
     const secs = parseInt(paceSeconds, 10) || 0;
     return mins + secs / 60;
   }, [paceMinutes, paceSeconds]);
 
-  const finishTime = useMemo(
-    () => calculateFinishTime(distanceKm, paceMinPerKm),
-    [distanceKm, paceMinPerKm]
-  );
+  const previewDistance = plannedDistanceKm ?? null;
 
-  const splits = useMemo(
-    () => generateSplits(distanceKm, paceMinPerKm),
-    [distanceKm, paceMinPerKm]
-  );
+  const finishTime = useMemo(() => {
+    if (!previewDistance) return '--:--';
+    return calculateFinishTime(previewDistance, paceMinPerKm);
+  }, [previewDistance, paceMinPerKm]);
+
+  const splits = useMemo(() => {
+    if (!previewDistance) return [];
+    return generateSplits(previewDistance, paceMinPerKm);
+  }, [previewDistance, paceMinPerKm]);
 
   const weightKg = userAge ? Math.max(50, 80 - (userAge - 25) * 0.3) : 70;
-  const calories = useMemo(
-    () => estimateCalories(distanceKm, weightKg, paceMinPerKm),
-    [distanceKm, weightKg, paceMinPerKm]
-  );
+  const calories = useMemo(() => {
+    if (!previewDistance) return null;
+    return estimateCalories(previewDistance, weightKg, paceMinPerKm);
+  }, [previewDistance, weightKg, paceMinPerKm]);
 
   const handleCalculate = () => {
-    onCalculate({
-      marathonType,
-      distanceKm,
-      paceMinPerKm,
-      finishTime,
-      splits,
-      calories,
-    });
+    onCalculate({ marathonType, paceMinPerKm });
   };
 
   const types: MarathonType[] = ['5k', '10k', 'half', 'full'];
+  const canPlan = destinationSelected && !loading;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.card }]}>
-      <Text style={styles.sectionTitle}>Race Distance</Text>
+      <Text style={styles.sectionTitle}>Run label</Text>
       <View style={styles.typeRow}>
         {types.map((type) => (
           <Pressable
@@ -137,8 +134,10 @@ export default function MarathonCalculator({ onCalculate, userAge, loading = fal
 
       <View style={[styles.preview, { backgroundColor: colors.background }]}>
         <View style={styles.previewItem}>
-          <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>Distance</Text>
-          <Text style={[styles.previewValue, { color: colors.text }]}>{distanceKm} km</Text>
+          <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>Street route</Text>
+          <Text style={[styles.previewValue, { color: colors.text }]}>
+            {previewDistance != null ? `${previewDistance.toFixed(2)} km` : 'Tap map'}
+          </Text>
         </View>
         <View style={styles.previewItem}>
           <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>Finish Time</Text>
@@ -146,33 +145,43 @@ export default function MarathonCalculator({ onCalculate, userAge, loading = fal
         </View>
         <View style={styles.previewItem}>
           <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>Calories</Text>
-          <Text style={[styles.previewValue, { color: colors.text }]}>~{calories}</Text>
+          <Text style={[styles.previewValue, { color: colors.text }]}>
+            {calories != null ? `~${calories}` : '--'}
+          </Text>
         </View>
       </View>
 
-      <ScrollView style={styles.splitsScroll} nestedScrollEnabled showsVerticalScrollIndicator={false}>
-        <Text style={[styles.splitsTitle, { color: colors.textSecondary }]}>Split Times</Text>
-        {splits.map((split) => (
-          <View key={split.km} style={[styles.splitRow, { borderBottomColor: colors.border }]}>
-            <Text style={[styles.splitKm, { color: colors.text }]}>{split.km} km</Text>
-            <Text style={[styles.splitTime, { color: Colors.accent }]}>{split.cumulativeTime}</Text>
-            <Text style={[styles.splitPace, { color: colors.textSecondary }]}>{split.pace}/km</Text>
-          </View>
-        ))}
-      </ScrollView>
+      {splits.length > 0 && (
+        <ScrollView style={styles.splitsScroll} nestedScrollEnabled showsVerticalScrollIndicator={false}>
+          <Text style={[styles.splitsTitle, { color: colors.textSecondary }]}>Split Times</Text>
+          {splits.map((split) => (
+            <View key={split.km} style={[styles.splitRow, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.splitKm, { color: colors.text }]}>{split.km} km</Text>
+              <Text style={[styles.splitTime, { color: Colors.accent }]}>{split.cumulativeTime}</Text>
+              <Text style={[styles.splitPace, { color: colors.textSecondary }]}>{split.pace}/km</Text>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+
+      {!destinationSelected && (
+        <Text style={[styles.hint, { color: colors.textSecondary }]}>
+          Tap the map to choose your finish point. Route starts from your current location.
+        </Text>
+      )}
 
       <Pressable
-        style={[styles.button, loading && styles.buttonDisabled]}
+        style={[styles.button, (!canPlan || loading) && styles.buttonDisabled]}
         onPress={handleCalculate}
-        disabled={loading}
+        disabled={!canPlan}
       >
         {loading ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color="#FFF" size="small" />
-            <Text style={styles.buttonText}>Fetching street route...</Text>
+            <Text style={styles.buttonText}>Loading street route...</Text>
           </View>
         ) : (
-          <Text style={styles.buttonText}>Plan Route on Streets</Text>
+          <Text style={styles.buttonText}>Get Street Route</Text>
         )}
       </Pressable>
     </View>
@@ -242,15 +251,18 @@ const styles = StyleSheet.create({
   previewItem: {
     alignItems: 'center',
     gap: 4,
+    flex: 1,
   },
   previewLabel: {
     fontSize: 11,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+    textAlign: 'center',
   },
   previewValue: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
+    textAlign: 'center',
   },
   splitsScroll: {
     maxHeight: 120,
@@ -282,6 +294,11 @@ const styles = StyleSheet.create({
     width: 70,
     textAlign: 'right',
   },
+  hint: {
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
   button: {
     backgroundColor: Colors.accent,
     borderRadius: 14,
@@ -290,7 +307,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   buttonDisabled: {
-    opacity: 0.75,
+    opacity: 0.5,
   },
   loadingRow: {
     flexDirection: 'row',

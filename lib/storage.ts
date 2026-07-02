@@ -19,6 +19,7 @@ export type SavedRun = {
   finishTime: string;
   splits: Split[];
   route: Coordinate[];
+  destination?: Coordinate;
   routeDistanceKm?: number;
   routeSource?: 'directions' | 'fallback';
   mapSnapshotUri?: string;

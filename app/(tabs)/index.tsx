@@ -15,9 +15,12 @@ import MarathonCalculator from '@/components/MarathonCalculator';
 import { useUser } from '@/context/UserContext';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import { DirectionsError, generateRunningRoute } from '@/lib/directions';
+import { DirectionsError, fetchWalkingRoute } from '@/lib/directions';
 import {
   MARATHON_LABELS,
+  calculateFinishTime,
+  estimateCalories,
+  generateSplits,
   type Coordinate,
   type MarathonType,
   type Split,
@@ -31,10 +34,12 @@ export default function RunScreen() {
   const mapRef = useRef<AnimatedMapHandle>(null);
 
   const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
+  const [destination, setDestination] = useState<Coordinate | null>(null);
   const [route, setRoute] = useState<Coordinate[]>([]);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeInfo, setRouteInfo] = useState<{
     distanceKm: number;
+    durationMinutes: number;
     source: 'directions' | 'fallback';
   } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -45,6 +50,7 @@ export default function RunScreen() {
     finishTime: string;
     splits: Split[];
     calories: number;
+    destination: Coordinate;
   } | null>(null);
 
   useEffect(() => {
@@ -61,64 +67,84 @@ export default function RunScreen() {
     })();
   }, []);
 
+  const handleMapPress = useCallback((coordinate: Coordinate) => {
+    setDestination(coordinate);
+    setRoute([]);
+    setRouteInfo(null);
+    setLastPlan(null);
+  }, []);
+
+  const handleClearDestination = useCallback(() => {
+    setDestination(null);
+    setRoute([]);
+    setRouteInfo(null);
+    setLastPlan(null);
+  }, []);
+
   const handleCalculate = useCallback(
-    async (data: {
-      marathonType: MarathonType;
-      distanceKm: number;
-      paceMinPerKm: number;
-      finishTime: string;
-      splits: Split[];
-      calories: number;
-    }) => {
+    async (data: { marathonType: MarathonType; paceMinPerKm: number }) => {
       if (!userLocation) {
-        Alert.alert('Location Required', 'Enable location to plan a street-level route.');
+        Alert.alert('Location Required', 'Enable location to plan a street route from where you are.');
+        return;
+      }
+      if (!destination) {
+        Alert.alert('Choose Destination', 'Tap the map to pick where you want to run.');
         return;
       }
 
-      setLastPlan(data);
+      setRouteLoading(true);
       setRoute([]);
       setRouteInfo(null);
-      setRouteLoading(true);
+      setLastPlan(null);
 
       try {
-        const result = await generateRunningRoute(userLocation, data.distanceKm);
+        const result = await fetchWalkingRoute(userLocation, destination);
+        const distanceKm = result.distanceKm;
+        const finishTime = calculateFinishTime(distanceKm, data.paceMinPerKm);
+        const splits = generateSplits(distanceKm, data.paceMinPerKm);
+        const weightKg = user?.age ? Math.max(50, 80 - (user.age - 25) * 0.3) : 70;
+        const calories = estimateCalories(distanceKm, weightKg, data.paceMinPerKm);
+
         setRoute(result.coordinates);
         setRouteInfo({
-          distanceKm: result.distanceKm,
+          distanceKm,
+          durationMinutes: result.durationMinutes,
           source: result.source,
+        });
+        setLastPlan({
+          marathonType: data.marathonType,
+          distanceKm,
+          paceMinPerKm: data.paceMinPerKm,
+          finishTime,
+          splits,
+          calories,
+          destination,
         });
 
         setTimeout(() => {
           mapRef.current?.fitRoute();
           mapRef.current?.animateRoute();
         }, 800);
-
-        if (result.source === 'fallback') {
-          Alert.alert(
-            'Approximate Route',
-            'Google Directions could not build a full street route. Showing a fallback loop — check your API key and enable the Directions API.'
-          );
-        }
       } catch (err) {
         const message =
           err instanceof DirectionsError
             ? err.message
-            : 'Could not fetch route from Google Directions.';
+            : 'Could not fetch a walking route on streets.';
         Alert.alert('Route Error', message);
       } finally {
         setRouteLoading(false);
       }
     },
-    [userLocation]
+    [userLocation, destination, user?.age]
   );
 
   const handleSave = async () => {
     if (!lastPlan) {
-      Alert.alert('Plan First', 'Calculate a marathon plan before saving.');
+      Alert.alert('Plan First', 'Get a street route before saving.');
       return;
     }
     if (route.length < 2) {
-      Alert.alert('No Route', 'Wait for the route to generate on the map.');
+      Alert.alert('No Route', 'Wait for the route to load on the map.');
       return;
     }
 
@@ -127,13 +153,14 @@ export default function RunScreen() {
 
     const run: SavedRun = {
       id: Date.now().toString(),
-      name: `${MARATHON_LABELS[lastPlan.marathonType]} — ${user?.name ?? 'Runner'}`,
+      name: `${MARATHON_LABELS[lastPlan.marathonType]} · ${lastPlan.distanceKm.toFixed(1)} km`,
       marathonType: lastPlan.marathonType,
       distanceKm: lastPlan.distanceKm,
       paceMinPerKm: lastPlan.paceMinPerKm,
       finishTime: lastPlan.finishTime,
       splits: lastPlan.splits,
       route,
+      destination: lastPlan.destination,
       routeDistanceKm: routeInfo?.distanceKm,
       routeSource: routeInfo?.source,
       mapSnapshotUri: snapshot ?? undefined,
@@ -143,7 +170,7 @@ export default function RunScreen() {
 
     await saveRun(run);
     setSaving(false);
-    Alert.alert('Saved!', 'Your marathon plan has been added to your library.');
+    Alert.alert('Saved!', 'Your route has been added to your library.');
   };
 
   return (
@@ -167,23 +194,33 @@ export default function RunScreen() {
       <View style={styles.mapContainer}>
         <AnimatedMap
           ref={mapRef}
-          userLocation={userLocation}
+          origin={userLocation}
+          destination={destination}
           route={route}
           animateOnMount
+          selectionEnabled={!routeLoading}
+          onMapPress={handleMapPress}
         />
         {routeLoading && (
           <View style={styles.mapLoading}>
             <ActivityIndicator size="large" color={Colors.accent} />
-            <Text style={styles.mapLoadingText}>Building street route...</Text>
+            <Text style={styles.mapLoadingText}>Loading street route...</Text>
           </View>
         )}
         <View style={[styles.mapBadge, { backgroundColor: colors.mapOverlay }]}>
           <Text style={styles.mapBadgeText}>
-            {routeInfo?.source === 'directions'
-              ? `Google Directions · ${routeInfo.distanceKm.toFixed(1)} km`
-              : '3D Buildings · Animated Route'}
+            {routeInfo
+              ? `Street route · ${routeInfo.distanceKm.toFixed(2)} km · ~${routeInfo.durationMinutes} min walk`
+              : destination
+                ? 'Tap Get Street Route below'
+                : 'Tap map to choose finish point'}
           </Text>
         </View>
+        {destination && !routeLoading && (
+          <Pressable style={styles.clearBtn} onPress={handleClearDestination}>
+            <Text style={styles.clearBtnText}>Clear</Text>
+          </Pressable>
+        )}
       </View>
 
       <ScrollView
@@ -196,6 +233,8 @@ export default function RunScreen() {
           onCalculate={handleCalculate}
           userAge={user?.age}
           loading={routeLoading}
+          destinationSelected={!!destination}
+          plannedDistanceKm={routeInfo?.distanceKm ?? null}
         />
 
         {lastPlan && route.length > 1 && !routeLoading && (
@@ -235,7 +274,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   mapContainer: {
-    height: 260,
+    height: 280,
     marginHorizontal: 20,
     borderRadius: 16,
     overflow: 'hidden',
@@ -257,6 +296,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 12,
     left: 12,
+    right: 72,
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 8,
@@ -265,6 +305,20 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 11,
     fontWeight: '600',
+  },
+  clearBtn: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    backgroundColor: 'rgba(239, 68, 68, 0.9)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  clearBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   scroll: { flex: 1 },
   scrollContent: {

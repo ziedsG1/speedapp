@@ -58,6 +58,8 @@ export default function RunDetailScreen() {
           <View style={styles.mapWrap}>
             <AnimatedMap
               ref={mapRef}
+              origin={run.route[0]}
+              destination={run.destination ?? run.route[run.route.length - 1]}
               route={run.route}
               animateOnMount
               interactive={false}
@@ -114,7 +116,13 @@ export default function RunDetailScreen() {
         </View>
 
         <View style={styles.mapWrap}>
-          <AnimatedMap route={run.route} animateOnMount interactive />
+          <AnimatedMap
+            origin={run.route[0]}
+            destination={run.destination ?? run.route[run.route.length - 1]}
+            route={run.route}
+            animateOnMount
+            interactive
+          />
         </View>
       </ScrollView>
     </>

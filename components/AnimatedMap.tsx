@@ -4,7 +4,6 @@ import MapView, {
   Marker,
   Polyline,
   PROVIDER_GOOGLE,
-  type Camera,
   type Region,
 } from 'react-native-maps';
 import { customMapStyle } from '@/constants/mapStyle';
@@ -17,10 +16,13 @@ export type AnimatedMapHandle = {
 };
 
 type AnimatedMapProps = {
-  userLocation?: Coordinate | null;
+  origin?: Coordinate | null;
+  destination?: Coordinate | null;
   route?: Coordinate[];
   animateOnMount?: boolean;
   interactive?: boolean;
+  selectionEnabled?: boolean;
+  onMapPress?: (coordinate: Coordinate) => void;
   style?: object;
 };
 
@@ -32,7 +34,19 @@ const DEFAULT_REGION: Region = {
 };
 
 const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
-  ({ userLocation, route = [], animateOnMount = true, interactive = true, style }, ref) => {
+  (
+    {
+      origin,
+      destination,
+      route = [],
+      animateOnMount = true,
+      interactive = true,
+      selectionEnabled = false,
+      onMapPress,
+      style,
+    },
+    ref
+  ) => {
     const mapRef = useRef<MapView>(null);
     const [animatedIndex, setAnimatedIndex] = useState(0);
     const animationRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -57,11 +71,13 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
     }));
 
     const fitToRoute = () => {
-      if (route.length < 2) {
-        if (userLocation) {
+      const points = route.length >= 2 ? route : [origin, destination].filter(Boolean) as Coordinate[];
+
+      if (points.length < 2) {
+        if (origin) {
           mapRef.current?.animateCamera(
             {
-              center: userLocation,
+              center: origin,
               pitch: 55,
               heading: 0,
               altitude: 800,
@@ -72,7 +88,8 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
         }
         return;
       }
-      mapRef.current?.fitToCoordinates(route, {
+
+      mapRef.current?.fitToCoordinates(points, {
         edgePadding: { top: 80, right: 40, bottom: 80, left: 40 },
         animated: true,
       });
@@ -110,13 +127,24 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
       return () => {
         if (animationRef.current) clearInterval(animationRef.current);
       };
-    }, [route, userLocation]);
+    }, [route, origin, destination]);
 
-    const initialRegion: Region = userLocation
-      ? { ...userLocation, latitudeDelta: 0.015, longitudeDelta: 0.015 }
+    useEffect(() => {
+      setAnimatedIndex(0);
+    }, [route]);
+
+    const handlePress = (event: { nativeEvent: { coordinate: Coordinate } }) => {
+      if (!selectionEnabled || !onMapPress) return;
+      onMapPress(event.nativeEvent.coordinate);
+    };
+
+    const initialRegion: Region = origin
+      ? { ...origin, latitudeDelta: 0.015, longitudeDelta: 0.015 }
       : DEFAULT_REGION;
 
     const animatedRoute = route.slice(0, animatedIndex + 1);
+    const startPoint = origin ?? route[0];
+    const endPoint = destination ?? route[route.length - 1];
 
     return (
       <View style={[styles.container, style]}>
@@ -135,9 +163,14 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
           scrollEnabled={interactive}
           zoomEnabled={interactive}
           mapType="standard"
+          onPress={handlePress}
         >
-          {userLocation && (
-            <Marker coordinate={userLocation} title="You" pinColor="#FF6B35" />
+          {startPoint && (
+            <Marker coordinate={startPoint} title="Start" description="You are here" pinColor="#10B981" />
+          )}
+
+          {endPoint && (!startPoint || endPoint.latitude !== startPoint.latitude || endPoint.longitude !== startPoint.longitude) && (
+            <Marker coordinate={endPoint} title="Finish" description="Your destination" pinColor="#EF4444" />
           )}
 
           {route.length > 1 && (
@@ -156,8 +189,6 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
                 lineCap="round"
                 lineJoin="round"
               />
-              <Marker coordinate={route[0]} title="Start" pinColor="#10B981" />
-              <Marker coordinate={route[route.length - 1]} title="Finish" pinColor="#EF4444" />
             </>
           )}
         </MapView>
