@@ -51,6 +51,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     extra: {
       ...config.extra,
       googleMapsApiKey,
+      serpApiKey: process.env.SERPAPI_API_KEY ?? config.extra?.serpApiKey,
     },
   };
 };

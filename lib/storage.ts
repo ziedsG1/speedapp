@@ -21,7 +21,7 @@ export type SavedRun = {
   route: Coordinate[];
   destination?: Coordinate;
   routeDistanceKm?: number;
-  routeSource?: 'directions' | 'fallback';
+  routeSource?: 'serpapi' | 'directions' | 'fallback';
   mapSnapshotUri?: string;
   calories?: number;
   createdAt: string;

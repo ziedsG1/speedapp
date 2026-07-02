@@ -83,6 +83,11 @@ export default function RunDetailScreen() {
                   ? `${run.routeDistanceKm.toFixed(1)} km`
                   : `${run.distanceKm} km`}
               </Text>
+              {run.routeSource === 'serpapi' && (
+                <Text style={[styles.routeSource, { color: colors.textSecondary }]}>
+                  SerpApi street route
+                </Text>
+              )}
               {run.routeSource === 'directions' && (
                 <Text style={[styles.routeSource, { color: colors.textSecondary }]}>
                   Google Directions
