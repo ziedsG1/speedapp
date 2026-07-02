@@ -19,22 +19,16 @@ if [ -z "$WORKSPACE" ]; then
   exit 1
 fi
 
+SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+
 echo "=== Xcode workspace: $WORKSPACE ==="
-xcodebuild -workspace "$WORKSPACE" -list
-
-SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list 2>/dev/null | awk '/Schemes:/{getline; gsub(/^[ \t]+/, ""); print; exit}')
-if [ -z "$SCHEME" ]; then
-  SCHEME=$(basename "$WORKSPACE" .xcworkspace)
-fi
-
 echo "=== Using scheme: $SCHEME ==="
+xcodebuild -workspace "$WORKSPACE" -list
 
 DERIVED="${RUNNER_TEMP:-/tmp}/DerivedData"
 rm -rf "$DERIVED"
 mkdir -p "$DERIVED"
 
-# Unsigned device build (more reliable than archive for Expo/RN projects).
-set +e
 xcodebuild \
   -workspace "$WORKSPACE" \
   -scheme "$SCHEME" \
@@ -50,20 +44,16 @@ xcodebuild \
   ONLY_ACTIVE_ARCH=NO \
   COMPILER_INDEX_STORE_ENABLE=NO \
   2>&1 | tee "$LOG_FILE"
-BUILD_EXIT=${PIPESTATUS[0]}
-set -e
 
-if [ "$BUILD_EXIT" -ne 0 ]; then
-  echo "xcodebuild failed with exit code $BUILD_EXIT"
-  echo "=== Last 120 lines of build log ==="
-  tail -120 "$LOG_FILE" || true
-  exit "$BUILD_EXIT"
+PRODUCTS="$DERIVED/Build/Products/Release-iphoneos"
+APP_PATH="$PRODUCTS/${SCHEME}.app"
+if [ ! -d "$APP_PATH" ]; then
+  APP_PATH=$(find "$PRODUCTS" -maxdepth 1 -type d -name "*.app" | head -1 || true)
 fi
 
-APP_PATH=$(find "$DERIVED/Build/Products/Release-iphoneos" -maxdepth 1 -name "*.app" | head -1)
 if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
-  echo "Could not find .app in DerivedData"
-  find "$DERIVED" -name "*.app" || true
+  echo "Could not find .app bundle"
+  find "$DERIVED/Build/Products" -type d -name "*.app" || true
   exit 1
 fi
 
