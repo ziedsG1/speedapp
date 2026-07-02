@@ -20,11 +20,6 @@ function readGoogleMapsApiKey(): string {
   const iosKey = normalizeApiKey(Constants.expoConfig?.ios?.config?.googleMapsApiKey as string | undefined);
   if (iosKey) return iosKey;
 
-  const androidKey = normalizeApiKey(
-    (Constants.expoConfig?.android?.config?.googleMaps as { apiKey?: string } | undefined)?.apiKey
-  );
-  if (androidKey) return androidKey;
-
   return '';
 }
 

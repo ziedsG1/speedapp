@@ -1,4 +1,4 @@
-# Option 2 — Build IPA with GitHub Actions
+# Build IPA with GitHub Actions
 
 Follow these steps on your Windows PC to get the `.ipa` file.
 
@@ -43,56 +43,47 @@ When prompted, sign in with your GitHub account (browser or token).
 
 ---
 
-## Step 4 — (Optional) Add Google Maps API key
-
-Maps and street routing work best when you add your Google Maps API key as a GitHub secret:
+## Step 4 — (Optional) Add API keys
 
 1. GitHub repo → **Settings** → **Secrets and variables** → **Actions**
-2. **New repository secret**
-3. Name: `GOOGLE_MAPS_API_KEY`
-4. Value: your Google Cloud API key (Maps SDK + Directions API enabled)
+2. Add secrets:
 
-The build still works without this secret, but maps may not load on device.
+| Name | Purpose |
+|------|---------|
+| `GOOGLE_MAPS_API_KEY` | Google Maps display on iOS |
+| `SERPAPI_API_KEY` | Optional SerpApi routing |
+
+Street routing works without Google Directions — the app uses **OSRM** (free) by default.
 
 ---
 
 ## Step 5 — Run the build workflow
 
-1. Open your repo on GitHub: `https://github.com/YOUR_GITHUB_USERNAME/speedapp`
-2. Click the **Actions** tab
-3. Click **Build iOS IPA** in the left sidebar
-4. Click **Run workflow** → **Run workflow** (green button)
-5. Wait about **10–15 minutes** for the build to finish (green checkmark)
+1. GitHub repo → **Actions**
+2. Open **Build iOS IPA**
+3. Click **Run workflow** → **Run workflow** (or push to `main` to trigger automatically)
+4. Wait for the green checkmark (~10–20 minutes)
 
 ---
 
 ## Step 6 — Download the IPA
 
-1. Click the completed workflow run
-2. Scroll down to **Artifacts**
+1. Open the completed workflow run
+2. Scroll to **Artifacts**
 3. Download **SpeedApp-ipa**
-4. Unzip it — inside you will find `SpeedApp-unsigned.ipa`
+4. Unzip — you get `SpeedApp-unsigned.ipa`
 
 ---
 
-## Step 7 — Install on your iPhone
+## Step 7 — Install on iPhone (Sideloadly)
 
-The GitHub build produces an **unsigned** IPA. To install it on iPhone you need to **sign** it first.
-
-### Easiest way on Windows: Sideloadly
-
-1. Download [Sideloadly](https://sideloadly.io/) on your PC
-2. Connect your iPhone with a USB cable
+1. Download [Sideloadly](https://sideloadly.io/) on Windows
+2. Connect iPhone via USB
 3. Drag `SpeedApp-unsigned.ipa` into Sideloadly
-4. Enter your **Apple ID** email (free account works)
-5. Click **Start** — the app installs on your iPhone
+4. Enter your Apple ID
+5. Click **Start**
 
-**Note:** With a free Apple ID, the app expires after **7 days**. Re-install with Sideloadly to refresh.
-
-### Alternative: AltStore
-
-1. Install [AltStore](https://altstore.io/) on iPhone + AltServer on PC
-2. Use AltStore to sideload the signed IPA
+The app installs on your phone. Re-sign every 7 days with a free Apple ID, or use a paid developer account for longer.
 
 ---
 
@@ -100,25 +91,15 @@ The GitHub build produces an **unsigned** IPA. To install it on iPhone you need 
 
 | Problem | Fix |
 |---------|-----|
-| `git push` asks for password | Use a [Personal Access Token](https://github.com/settings/tokens) instead of password |
-| Workflow fails on `pod install` | Re-run the workflow — GitHub macOS runners occasionally need a retry |
-| Workflow fails with exit code 65 | Download **xcodebuild-log** from Artifacts on the failed run and check the last errors |
-| Workflow fails on `expo prebuild` | Check the Actions log; ensure `app.json` / `app.config.ts` is valid |
-| iPhone says "Unable to install" | Sign the IPA with Sideloadly/AltStore using your Apple ID |
-| App stops working after 7 days | Re-sideload with Sideloadly (free Apple ID limit) |
-| Maps are blank on device | Add `GOOGLE_MAPS_API_KEY` secret and rebuild |
+| Build fails on prebuild | Check `app.json` / `app.config.ts`; ensure Node 24 in CI |
+| Maps blank on device | Add `GOOGLE_MAPS_API_KEY` secret; enable **Maps SDK for iOS** in Google Cloud |
+| "Untrusted developer" | iPhone → Settings → General → VPN & Device Management → Trust |
+| Workflow not listed | Push to `main` once; workflow file must be on default branch |
 
 ---
 
-## Automatic builds
+## What is NOT used
 
-Every time you push to the `main` branch, GitHub will automatically rebuild the IPA.
-
-```powershell
-# After editing files:
-git add .
-git commit -m "Update app"
-git push
-```
-
-Then download the new IPA from **Actions → Artifacts**.
+- **EAS Build** — removed; CI builds IPA directly with Xcode
+- **Android / web** — iOS IPA only
+- **Expo Go** — not needed; install the IPA on device

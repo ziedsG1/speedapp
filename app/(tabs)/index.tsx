@@ -25,7 +25,18 @@ import {
   type MarathonType,
   type Split,
 } from '@/lib/marathon';
+import {
+  closestPointOnRoute,
+  distanceMeters,
+  pathDistanceMeters,
+  shouldAppendPathPoint,
+  sliceRouteFrom,
+} from '@/lib/route-tracking';
 import { saveRun, type SavedRun } from '@/lib/storage';
+
+const OFF_ROUTE_THRESHOLD_M = 45;
+const REROUTE_COOLDOWN_MS = 15000;
+const ARRIVAL_THRESHOLD_M = 25;
 
 export default function RunScreen() {
   const { user } = useUser();
@@ -37,6 +48,12 @@ export default function RunScreen() {
   const [destination, setDestination] = useState<Coordinate | null>(null);
   const [route, setRoute] = useState<Coordinate[]>([]);
   const [routeLoading, setRouteLoading] = useState(false);
+  const [rerouting, setRerouting] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
+  const [routeReady, setRouteReady] = useState(false);
+  const [runnerPosition, setRunnerPosition] = useState<Coordinate | null>(null);
+  const [traveledPath, setTraveledPath] = useState<Coordinate[]>([]);
+  const [distanceTraveledKm, setDistanceTraveledKm] = useState(0);
   const [routeInfo, setRouteInfo] = useState<{
     distanceKm: number;
     durationMinutes: number;
@@ -53,6 +70,25 @@ export default function RunScreen() {
     destination: Coordinate;
   } | null>(null);
 
+  const locationSubRef = useRef<Location.LocationSubscription | null>(null);
+  const lastRerouteAtRef = useRef(0);
+  const offRouteCountRef = useRef(0);
+  const destinationRef = useRef<Coordinate | null>(null);
+  const routeRef = useRef<Coordinate[]>([]);
+  const isRunningRef = useRef(false);
+
+  useEffect(() => {
+    destinationRef.current = destination;
+  }, [destination]);
+
+  useEffect(() => {
+    routeRef.current = route;
+  }, [route]);
+
+  useEffect(() => {
+    isRunningRef.current = isRunning;
+  }, [isRunning]);
+
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -67,19 +103,71 @@ export default function RunScreen() {
     })();
   }, []);
 
-  const handleMapPress = useCallback((coordinate: Coordinate) => {
-    setDestination(coordinate);
-    setRoute([]);
-    setRouteInfo(null);
-    setLastPlan(null);
+  useEffect(() => {
+    return () => {
+      locationSubRef.current?.remove();
+    };
   }, []);
 
+  const resetRunState = useCallback(() => {
+    setRouteReady(false);
+    setIsRunning(false);
+    setRunnerPosition(null);
+    setTraveledPath([]);
+    setDistanceTraveledKm(0);
+    offRouteCountRef.current = 0;
+    lastRerouteAtRef.current = 0;
+  }, []);
+
+  const handleMapPress = useCallback(
+    (coordinate: Coordinate) => {
+      if (isRunning) return;
+      setDestination(coordinate);
+      setRoute([]);
+      setRouteInfo(null);
+      setLastPlan(null);
+      resetRunState();
+    },
+    [isRunning, resetRunState]
+  );
+
   const handleClearDestination = useCallback(() => {
+    if (isRunning) return;
     setDestination(null);
     setRoute([]);
     setRouteInfo(null);
     setLastPlan(null);
-  }, []);
+    resetRunState();
+  }, [isRunning, resetRunState]);
+
+  const refreshRouteFrom = useCallback(
+    async (from: Coordinate, dest: Coordinate, silent = false) => {
+      if (!silent) setRerouting(true);
+      try {
+        const result = await fetchWalkingRoute(from, dest);
+        setRoute(result.coordinates);
+        setRouteInfo({
+          distanceKm: result.distanceKm,
+          durationMinutes: result.durationMinutes,
+          source: result.source,
+        });
+        setRouteReady(true);
+        return result;
+      } catch (err) {
+        if (!silent) {
+          const message =
+            err instanceof DirectionsError
+              ? err.message
+              : 'Could not update the route.';
+          Alert.alert('Route Error', message);
+        }
+        return null;
+      } finally {
+        if (!silent) setRerouting(false);
+      }
+    },
+    []
+  );
 
   const handleCalculate = useCallback(
     async (data: { marathonType: MarathonType; paceMinPerKm: number }) => {
@@ -96,6 +184,7 @@ export default function RunScreen() {
       setRoute([]);
       setRouteInfo(null);
       setLastPlan(null);
+      resetRunState();
 
       try {
         const result = await fetchWalkingRoute(userLocation, destination);
@@ -111,6 +200,8 @@ export default function RunScreen() {
           durationMinutes: result.durationMinutes,
           source: result.source,
         });
+        setRouteReady(true);
+        setRunnerPosition(userLocation);
         setLastPlan({
           marathonType: data.marathonType,
           distanceKm,
@@ -123,7 +214,6 @@ export default function RunScreen() {
 
         setTimeout(() => {
           mapRef.current?.fitRoute();
-          mapRef.current?.animateRoute();
         }, 800);
       } catch (err) {
         const message =
@@ -135,33 +225,148 @@ export default function RunScreen() {
         setRouteLoading(false);
       }
     },
-    [userLocation, destination, user?.age]
+    [userLocation, destination, user?.age, resetRunState]
   );
+
+  const handleLocationUpdate = useCallback(
+    async (loc: Location.LocationObject) => {
+      if (!isRunningRef.current) return;
+
+      const position: Coordinate = {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+      };
+      const dest = destinationRef.current;
+
+      setRunnerPosition(position);
+      setUserLocation(position);
+      mapRef.current?.followRunner(position);
+
+      setTraveledPath((prev) => {
+        if (!shouldAppendPathPoint(prev, position)) return prev;
+        const next = [...prev, position];
+        setDistanceTraveledKm(pathDistanceMeters(next) / 1000);
+        return next;
+      });
+
+      if (!dest) return;
+
+      if (distanceMeters(position, dest) <= ARRIVAL_THRESHOLD_M) {
+        locationSubRef.current?.remove();
+        locationSubRef.current = null;
+        setIsRunning(false);
+        Alert.alert('Finish!', 'You reached your destination.');
+        return;
+      }
+
+      const currentRoute = routeRef.current;
+      if (currentRoute.length >= 2) {
+        const remaining = sliceRouteFrom(position, currentRoute);
+        if (remaining.length >= 2) {
+          setRoute(remaining);
+        }
+
+        const { distanceM } = closestPointOnRoute(position, currentRoute);
+        if (distanceM > OFF_ROUTE_THRESHOLD_M) {
+          offRouteCountRef.current += 1;
+        } else {
+          offRouteCountRef.current = 0;
+        }
+
+        const now = Date.now();
+        const shouldReroute =
+          offRouteCountRef.current >= 2 && now - lastRerouteAtRef.current > REROUTE_COOLDOWN_MS;
+
+        if (shouldReroute) {
+          offRouteCountRef.current = 0;
+          lastRerouteAtRef.current = now;
+          void refreshRouteFrom(position, dest, true).then((result) => {
+            if (result) {
+              setLastPlan((plan) =>
+                plan
+                  ? {
+                      ...plan,
+                      distanceKm: result.distanceKm,
+                      finishTime: calculateFinishTime(result.distanceKm, plan.paceMinPerKm),
+                      splits: generateSplits(result.distanceKm, plan.paceMinPerKm),
+                    }
+                  : plan
+              );
+            }
+          });
+        }
+      }
+    },
+    [refreshRouteFrom]
+  );
+
+  const handleStartRunning = useCallback(async () => {
+    if (!userLocation || !destination || route.length < 2) {
+      Alert.alert('Plan First', 'Get a street route before you start running.');
+      return;
+    }
+
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Location Required', 'Allow location access to track your run.');
+      return;
+    }
+
+    const startPos = userLocation;
+    setIsRunning(true);
+    setRunnerPosition(startPos);
+    setTraveledPath([startPos]);
+    setDistanceTraveledKm(0);
+    offRouteCountRef.current = 0;
+    lastRerouteAtRef.current = Date.now();
+
+    locationSubRef.current?.remove();
+    locationSubRef.current = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.BestForNavigation,
+        timeInterval: 2000,
+        distanceInterval: 4,
+      },
+      handleLocationUpdate
+    );
+
+    mapRef.current?.followRunner(startPos);
+  }, [userLocation, destination, route.length, handleLocationUpdate]);
+
+  const handleStopRunning = useCallback(() => {
+    locationSubRef.current?.remove();
+    locationSubRef.current = null;
+    setIsRunning(false);
+  }, []);
 
   const handleSave = async () => {
     if (!lastPlan) {
       Alert.alert('Plan First', 'Get a street route before saving.');
       return;
     }
-    if (route.length < 2) {
+
+    const pathToSave = traveledPath.length > 1 ? traveledPath : route;
+    if (pathToSave.length < 2) {
       Alert.alert('No Route', 'Wait for the route to load on the map.');
       return;
     }
 
     setSaving(true);
     const snapshot = await mapRef.current?.captureSnapshot();
+    const actualDistanceKm =
+      traveledPath.length > 1 ? pathDistanceMeters(traveledPath) / 1000 : lastPlan.distanceKm;
 
     const run: SavedRun = {
       id: Date.now().toString(),
-      name: `${MARATHON_LABELS[lastPlan.marathonType]} · ${lastPlan.distanceKm.toFixed(1)} km`,
+      name: `${MARATHON_LABELS[lastPlan.marathonType]} · ${actualDistanceKm.toFixed(1)} km`,
       marathonType: lastPlan.marathonType,
       distanceKm: lastPlan.distanceKm,
       paceMinPerKm: lastPlan.paceMinPerKm,
       finishTime: lastPlan.finishTime,
       splits: lastPlan.splits,
-      route,
+      route: pathToSave,
       destination: lastPlan.destination,
-      routeDistanceKm: routeInfo?.distanceKm,
+      routeDistanceKm: actualDistanceKm,
       routeSource: routeInfo?.source,
       mapSnapshotUri: snapshot ?? undefined,
       calories: lastPlan.calories,
@@ -172,6 +377,16 @@ export default function RunScreen() {
     setSaving(false);
     Alert.alert('Saved!', 'Your route has been added to your library.');
   };
+
+  const badgeText = isRunning
+    ? `Running · ${distanceTraveledKm.toFixed(2)} km traveled`
+    : routeInfo
+      ? `${routeInfo.source === 'serpapi' ? 'SerpApi' : routeInfo.source === 'osrm' ? 'OSRM streets' : 'Google'} · ${routeInfo.distanceKm.toFixed(2)} km · ~${routeInfo.durationMinutes} min`
+      : destination
+        ? routeReady
+          ? 'Person at start — tap Start Running'
+          : 'Tap Get Street Route below'
+        : 'Tap map to choose finish point';
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -185,7 +400,7 @@ export default function RunScreen() {
         <Pressable
           style={[styles.animateBtn, { backgroundColor: colors.card }]}
           onPress={() => mapRef.current?.animateRoute()}
-          disabled={route.length < 2}
+          disabled={route.length < 2 || isRunning}
         >
           <SymbolView name={{ ios: 'play.fill', android: 'play_arrow', web: 'play_arrow' }} size={18} tintColor={Colors.accent} />
         </Pressable>
@@ -197,26 +412,26 @@ export default function RunScreen() {
           origin={userLocation}
           destination={destination}
           route={route}
+          traveledPath={traveledPath}
+          runnerPosition={runnerPosition}
+          isRunning={isRunning}
+          routeReady={routeReady}
           animateOnMount
-          selectionEnabled={!routeLoading}
+          selectionEnabled={!routeLoading && !isRunning}
           onMapPress={handleMapPress}
         />
-        {routeLoading && (
+        {(routeLoading || rerouting) && (
           <View style={styles.mapLoading}>
             <ActivityIndicator size="large" color={Colors.accent} />
-            <Text style={styles.mapLoadingText}>Loading street route...</Text>
+            <Text style={styles.mapLoadingText}>
+              {rerouting ? 'Updating route...' : 'Loading street route...'}
+            </Text>
           </View>
         )}
         <View style={[styles.mapBadge, { backgroundColor: colors.mapOverlay }]}>
-          <Text style={styles.mapBadgeText}>
-            {routeInfo
-              ? `${routeInfo.source === 'serpapi' ? 'SerpApi' : routeInfo.source === 'osrm' ? 'OSRM streets' : 'Google'} · ${routeInfo.distanceKm.toFixed(2)} km · ~${routeInfo.durationMinutes} min`
-              : destination
-                ? 'Tap Get Street Route below'
-                : 'Tap map to choose finish point'}
-          </Text>
+          <Text style={styles.mapBadgeText}>{badgeText}</Text>
         </View>
-        {destination && !routeLoading && (
+        {destination && !routeLoading && !isRunning && (
           <Pressable style={styles.clearBtn} onPress={handleClearDestination}>
             <Text style={styles.clearBtnText}>Clear</Text>
           </Pressable>
@@ -231,13 +446,18 @@ export default function RunScreen() {
       >
         <MarathonCalculator
           onCalculate={handleCalculate}
+          onStartRunning={handleStartRunning}
+          onStopRunning={handleStopRunning}
           userAge={user?.age}
           loading={routeLoading}
+          rerouting={rerouting}
           destinationSelected={!!destination}
           plannedDistanceKm={routeInfo?.distanceKm ?? null}
+          routeReady={routeReady}
+          isRunning={isRunning}
         />
 
-        {lastPlan && route.length > 1 && !routeLoading && (
+        {lastPlan && route.length > 1 && !routeLoading && !isRunning && (
           <Pressable
             style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
             onPress={handleSave}

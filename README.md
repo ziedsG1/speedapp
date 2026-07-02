@@ -1,64 +1,36 @@
 # SpeedApp — Marathon Runner App
 
-React Native (Expo) app for runners to plan marathons, view animated 3D Google Maps, and save runs to a personal library with map snapshots.
+iOS runner app: plan street routes, live GPS tracking, marathon calculator, and saved run library.
 
 **Bundle ID:** `com.speedapp.runner` · **Version:** 1.0.0
 
 ---
 
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| **[GITHUB-SETUP.md](./GITHUB-SETUP.md)** | GitHub Actions + download IPA + Sideloadly install (Windows-friendly) |
-
----
-
-## Features at a glance
-
-- Welcome screen with name, age, and location permission
-- Marathon calculator — 5K, 10K, Half, Full marathon
-- Animated Google Map with 3D buildings and street routes
-- Google Directions API for real walking paths
-- Library / history with map snapshot capture
-- Custom dark map styling (`constants/mapStyle.ts`)
-
----
-
-## Quick start
-
-### Windows (app changes + CI build)
+## Build IPA (Windows → GitHub Actions)
 
 ```powershell
 cd c:\Users\zied\Desktop\speedapp
-npm install
-# edit app/ components/ etc.
 git add .
 git commit -m "Your change"
 git push origin main
 ```
 
-Then download the IPA from **GitHub → Actions → SpeedApp-ipa** and install with [Sideloadly](https://sideloadly.io/). Details: [GITHUB-SETUP.md](./GITHUB-SETUP.md).
+Download **SpeedApp-ipa** from **GitHub → Actions**, then install with [Sideloadly](https://sideloadly.io/).
 
-### Local development
+Full steps: [GITHUB-SETUP.md](./GITHUB-SETUP.md)
 
-```powershell
-npm install
-npx expo start
-```
+---
 
-Scan the QR code with Expo Go, or press `a` for Android emulator.
+## What the CI build uses
 
-### macOS (run on device)
+Only iOS IPA tooling — no EAS, no Android, no web export:
 
-```bash
-npm install
-npm run prebuild:ios
-cd ios && pod install
-npx expo run:ios --device
-```
+1. `npm ci`
+2. `npx expo prebuild --platform ios --clean --no-install`
+3. `pod install` in `ios/`
+4. `xcodebuild` → unsigned `.ipa` artifact
 
-Set your **Team** in Xcode if needed, connect iPhone, press **Run**.
+Workflow: `.github/workflows/build-ios-ipa.yml`
 
 ---
 
@@ -66,34 +38,31 @@ Set your **Team** in Xcode if needed, connect iPhone, press **Run**.
 
 ```
 app/                  Screens (welcome, plan, library)
-components/           Map, marathon calculator
-lib/                  Directions API, marathon math, storage
-constants/            Colors, map style
-.github/workflows/    build-ios-ipa.yml — unsigned IPA on push to main
+components/           Map, marathon calculator, runner marker
+lib/                  Routing (OSRM / SerpApi), storage, tracking
+constants/            Colors, map style, API keys
+.github/workflows/    build-ios-ipa.yml
+scripts/              build-ios-ipa.sh (optional local Mac build)
 ```
 
 ---
 
-## Important constraints
+## GitHub secrets (optional)
 
-- **IPA cannot be built on Windows alone** — use GitHub Actions or a Mac.
-- CI produces an **unsigned** IPA; sign with Apple ID (Sideloadly / Xcode).
-- Free Apple ID installs **expire after ~7 days** — re-sideload to refresh.
-- Google Maps requires an API key with **Maps SDK for iOS** and **Directions API** enabled.
+| Secret | Purpose |
+|--------|---------|
+| `GOOGLE_MAPS_API_KEY` | Google Maps tiles on iOS |
+| `SERPAPI_API_KEY` | Optional premium routing |
 
----
-
-## Google Maps API key
-
-1. [Google Cloud Console](https://console.cloud.google.com/) → enable Maps SDK for iOS + Directions API
-2. Create an API key
-3. For local dev: copy `.env.example` → `.env.local` and set `GOOGLE_MAPS_API_KEY`
-4. For GitHub builds: add `GOOGLE_MAPS_API_KEY` as a repository secret (optional but recommended)
+Street routing works without Google Directions — OSRM is used as a free fallback.
 
 ---
 
-## Notes
+## macOS only (local IPA)
 
-- Routes use **Google Directions API** in walking mode with fallback if unavailable.
-- Map snapshots use `MapView.takeSnapshot()` when saving to the library.
-- Edit `constants/mapStyle.ts` to customize the map look.
+```bash
+npm ci
+npm run prebuild:ios
+cd ios && pod install && cd ..
+bash scripts/build-ios-ipa.sh
+```

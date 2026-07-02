@@ -6,6 +6,7 @@ import MapView, {
   PROVIDER_GOOGLE,
   type Region,
 } from 'react-native-maps';
+import RunnerMarker from '@/components/RunnerMarker';
 import { customMapStyle } from '@/constants/mapStyle';
 import type { Coordinate } from '@/lib/marathon';
 
@@ -13,12 +14,17 @@ export type AnimatedMapHandle = {
   captureSnapshot: () => Promise<string | null>;
   animateRoute: () => void;
   fitRoute: () => void;
+  followRunner: (position: Coordinate) => void;
 };
 
 type AnimatedMapProps = {
   origin?: Coordinate | null;
   destination?: Coordinate | null;
   route?: Coordinate[];
+  traveledPath?: Coordinate[];
+  runnerPosition?: Coordinate | null;
+  isRunning?: boolean;
+  routeReady?: boolean;
   animateOnMount?: boolean;
   interactive?: boolean;
   selectionEnabled?: boolean;
@@ -39,6 +45,10 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
       origin,
       destination,
       route = [],
+      traveledPath = [],
+      runnerPosition = null,
+      isRunning = false,
+      routeReady = false,
       animateOnMount = true,
       interactive = true,
       selectionEnabled = false,
@@ -68,10 +78,28 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
       },
       animateRoute: () => startRouteAnimation(),
       fitRoute: () => fitToRoute(),
+      followRunner: (position: Coordinate) => {
+        mapRef.current?.animateCamera(
+          {
+            center: position,
+            pitch: 55,
+            heading: 0,
+            altitude: 500,
+            zoom: 17,
+          },
+          { duration: 600 }
+        );
+      },
     }));
 
     const fitToRoute = () => {
-      const points = route.length >= 2 ? route : [origin, destination].filter(Boolean) as Coordinate[];
+      const points = [
+        ...route,
+        ...traveledPath,
+        origin,
+        destination,
+        runnerPosition,
+      ].filter(Boolean) as Coordinate[];
 
       if (points.length < 2) {
         if (origin) {
@@ -99,7 +127,7 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
     };
 
     const startRouteAnimation = () => {
-      if (route.length < 2) return;
+      if (route.length < 2 || isRunning) return;
       let index = 0;
       if (animationRef.current) clearInterval(animationRef.current);
 
@@ -121,17 +149,24 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
     };
 
     useEffect(() => {
-      if (animateOnMount) {
+      if (animateOnMount && !isRunning) {
         setTimeout(() => fitToRoute(), 500);
       }
       return () => {
         if (animationRef.current) clearInterval(animationRef.current);
       };
-    }, [route, origin, destination]);
+    }, [route, origin, destination, isRunning]);
 
     useEffect(() => {
       setAnimatedIndex(0);
     }, [route]);
+
+    useEffect(() => {
+      if (isRunning && animationRef.current) {
+        clearInterval(animationRef.current);
+        animationRef.current = null;
+      }
+    }, [isRunning]);
 
     const handlePress = (event: { nativeEvent: { coordinate: Coordinate } }) => {
       if (!selectionEnabled || !onMapPress) return;
@@ -145,6 +180,8 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
     const animatedRoute = route.slice(0, animatedIndex + 1);
     const startPoint = origin ?? route[0];
     const endPoint = destination ?? route[route.length - 1];
+    const showRunnerAtStart = routeReady && !isRunning && startPoint;
+    const showRunnerLive = isRunning && runnerPosition;
 
     return (
       <View style={[styles.container, style]}>
@@ -155,7 +192,7 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
           initialRegion={initialRegion}
           customMapStyle={customMapStyle}
           showsBuildings
-          showsUserLocation
+          showsUserLocation={!showRunnerAtStart && !showRunnerLive}
           showsMyLocationButton={false}
           showsCompass={false}
           pitchEnabled={interactive}
@@ -165,23 +202,47 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
           mapType="standard"
           onPress={handlePress}
         >
-          {startPoint && (
+          {startPoint && !showRunnerAtStart && (
             <Marker coordinate={startPoint} title="Start" description="You are here" pinColor="#10B981" />
           )}
 
-          {endPoint && (!startPoint || endPoint.latitude !== startPoint.latitude || endPoint.longitude !== startPoint.longitude) && (
-            <Marker coordinate={endPoint} title="Finish" description="Your destination" pinColor="#EF4444" />
+          {showRunnerAtStart && (
+            <RunnerMarker coordinate={startPoint} running={false} title="Start here" />
           )}
 
+          {showRunnerLive && (
+            <RunnerMarker coordinate={runnerPosition} running title="Running" />
+          )}
+
+          {endPoint &&
+            (!startPoint ||
+              endPoint.latitude !== startPoint.latitude ||
+              endPoint.longitude !== startPoint.longitude) && (
+              <Marker coordinate={endPoint} title="Finish" description="Your destination" pinColor="#EF4444" />
+            )}
+
           {route.length > 1 && (
+            <Polyline
+              coordinates={route}
+              strokeColor="rgba(255, 107, 53, 0.2)"
+              strokeWidth={8}
+              lineCap="round"
+              lineJoin="round"
+            />
+          )}
+
+          {isRunning && traveledPath.length > 1 && (
+            <Polyline
+              coordinates={traveledPath}
+              strokeColor="#10B981"
+              strokeWidth={5}
+              lineCap="round"
+              lineJoin="round"
+            />
+          )}
+
+          {!isRunning && route.length > 1 && (
             <>
-              <Polyline
-                coordinates={route}
-                strokeColor="rgba(255, 107, 53, 0.25)"
-                strokeWidth={8}
-                lineCap="round"
-                lineJoin="round"
-              />
               <Polyline
                 coordinates={animatedRoute.length > 1 ? animatedRoute : route}
                 strokeColor="#FF6B35"
@@ -190,6 +251,17 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
                 lineJoin="round"
               />
             </>
+          )}
+
+          {isRunning && route.length > 1 && (
+            <Polyline
+              coordinates={route}
+              strokeColor="#FF6B35"
+              strokeWidth={4}
+              lineCap="round"
+              lineJoin="round"
+              lineDashPattern={[1, 8]}
+            />
           )}
         </MapView>
       </View>

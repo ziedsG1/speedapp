@@ -23,18 +23,28 @@ type Props = {
     marathonType: MarathonType;
     paceMinPerKm: number;
   }) => void;
+  onStartRunning?: () => void;
+  onStopRunning?: () => void;
   userAge?: number;
   loading?: boolean;
   destinationSelected?: boolean;
   plannedDistanceKm?: number | null;
+  routeReady?: boolean;
+  isRunning?: boolean;
+  rerouting?: boolean;
 };
 
 export default function MarathonCalculator({
   onCalculate,
+  onStartRunning,
+  onStopRunning,
   userAge,
   loading = false,
   destinationSelected = false,
   plannedDistanceKm = null,
+  routeReady = false,
+  isRunning = false,
+  rerouting = false,
 }: Props) {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = Colors[colorScheme];
@@ -67,12 +77,28 @@ export default function MarathonCalculator({
     return estimateCalories(previewDistance, weightKg, paceMinPerKm);
   }, [previewDistance, weightKg, paceMinPerKm]);
 
-  const handleCalculate = () => {
+  const handlePrimaryAction = () => {
+    if (isRunning) {
+      onStopRunning?.();
+      return;
+    }
+    if (routeReady) {
+      onStartRunning?.();
+      return;
+    }
     onCalculate({ marathonType, paceMinPerKm });
   };
 
   const types: MarathonType[] = ['5k', '10k', 'half', 'full'];
-  const canPlan = destinationSelected && !loading;
+  const canPlan = destinationSelected && !loading && !isRunning;
+  const canStart = routeReady && !loading && !rerouting;
+  const buttonEnabled = isRunning ? true : routeReady ? canStart : canPlan;
+
+  const buttonLabel = isRunning
+    ? 'Stop Running'
+    : routeReady
+      ? 'Start Running'
+      : 'Get Street Route';
 
   return (
     <View style={[styles.container, { backgroundColor: colors.card }]}>
@@ -170,18 +196,30 @@ export default function MarathonCalculator({
         </Text>
       )}
 
+      {isRunning && (
+        <Text style={[styles.hint, { color: Colors.accent }]}>
+          Follow the orange route. Your green line grows as you move. The route updates if you turn onto another street.
+        </Text>
+      )}
+
       <Pressable
-        style={[styles.button, (!canPlan || loading) && styles.buttonDisabled]}
-        onPress={handleCalculate}
-        disabled={!canPlan}
+        style={[
+          styles.button,
+          isRunning && styles.buttonStop,
+          (!buttonEnabled || loading || rerouting) && styles.buttonDisabled,
+        ]}
+        onPress={handlePrimaryAction}
+        disabled={!buttonEnabled || loading || rerouting}
       >
-        {loading ? (
+        {loading || rerouting ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color="#FFF" size="small" />
-            <Text style={styles.buttonText}>Loading street route...</Text>
+            <Text style={styles.buttonText}>
+              {rerouting ? 'Updating route...' : 'Loading street route...'}
+            </Text>
           </View>
         ) : (
-          <Text style={styles.buttonText}>Get Street Route</Text>
+          <Text style={styles.buttonText}>{buttonLabel}</Text>
         )}
       </Pressable>
     </View>
@@ -305,6 +343,9 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 4,
+  },
+  buttonStop: {
+    backgroundColor: '#EF4444',
   },
   buttonDisabled: {
     opacity: 0.5,
