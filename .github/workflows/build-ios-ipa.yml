@@ -26,7 +26,7 @@ jobs:
         env:
           CI: "true"
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
-        run: npx expo prebuild --platform ios --no-install
+        run: npx expo prebuild --platform ios --clean --no-install
 
       - name: Install CocoaPods
         env:
@@ -37,7 +37,57 @@ jobs:
           pod install --repo-update
 
       - name: Build unsigned IPA
-        run: bash scripts/build-ios-ipa.sh
+        run: |
+          cd ios
+          WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list 2>/dev/null | awk '/Schemes:/{getline; gsub(/^[ \t]+/, ""); print; exit}')
+          if [ -z "$SCHEME" ]; then SCHEME=$(basename "$WORKSPACE" .xcworkspace); fi
+
+          echo "Workspace: $WORKSPACE"
+          echo "Scheme: $SCHEME"
+          xcodebuild -workspace "$WORKSPACE" -list
+
+          DERIVED="$RUNNER_TEMP/DerivedData"
+          LOG="$RUNNER_TEMP/xcodebuild.log"
+          rm -rf "$DERIVED"
+
+          set +e
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$DERIVED" \
+            build \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            ONLY_ACTIVE_ARCH=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            2>&1 | tee "$LOG"
+          BUILD_EXIT=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$BUILD_EXIT" -ne 0 ]; then
+            echo "xcodebuild failed ($BUILD_EXIT)"
+            tail -120 "$LOG" || true
+            exit "$BUILD_EXIT"
+          fi
+
+          APP_PATH=$(find "$DERIVED/Build/Products/Release-iphoneos" -maxdepth 1 -name "*.app" | head -1)
+          if [ -z "$APP_PATH" ]; then
+            find "$DERIVED" -name "*.app" || true
+            exit 1
+          fi
+
+          rm -rf "$RUNNER_TEMP/Payload" "$RUNNER_TEMP/SpeedApp-unsigned.ipa"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP_PATH" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP"
+          zip -qr SpeedApp-unsigned.ipa Payload
+          ls -lh SpeedApp-unsigned.ipa
 
       - name: Upload xcodebuild log on failure
         if: failure()
@@ -49,6 +99,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload IPA artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: SpeedApp-ipa
