@@ -7,11 +7,24 @@ on:
 
 jobs:
   build-ipa:
-    runs-on: macos-latest
+    runs-on: macos-26
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Select Xcode 26
+        run: |
+          echo "Available Xcode installs:"
+          ls /Applications | grep Xcode || true
+          for x in Xcode_26.4.app Xcode_26.5.app Xcode_26.2.app Xcode_26.4.1.app; do
+            if [ -d "/Applications/$x" ]; then
+              echo "Selecting /Applications/$x"
+              sudo xcode-select --switch "/Applications/$x"
+              break
+            fi
+          done
+          xcodebuild -version
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -38,7 +51,7 @@ jobs:
 
       - name: Build unsigned IPA
         run: |
-          set -euo pipefail
+          set -eo pipefail
 
           cd ios
           WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
@@ -52,11 +65,12 @@ jobs:
           LOG="$RUNNER_TEMP/xcodebuild.log"
           rm -rf "$DERIVED"
 
-          xcodebuild \
+          if ! xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
+            -destination "generic/platform=iOS" \
             -derivedDataPath "$DERIVED" \
             build \
             CODE_SIGN_IDENTITY="-" \
@@ -66,13 +80,16 @@ jobs:
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             ONLY_ACTIVE_ARCH=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            2>&1 | tee "$LOG"
+            2>&1 | tee "$LOG"; then
+            echo "=== xcodebuild failed — last 200 lines ==="
+            tail -200 "$LOG" || true
+            exit 1
+          fi
 
           PRODUCTS="$DERIVED/Build/Products/Release-iphoneos"
           echo "=== Products directory ==="
           ls -la "$PRODUCTS" || true
 
-          # Main app bundle matches the Expo scheme name (e.g. speedapp.app).
           APP_PATH="$PRODUCTS/${SCHEME}.app"
           if [ ! -d "$APP_PATH" ]; then
             APP_PATH=$(find "$PRODUCTS" -maxdepth 1 -type d -name "*.app" | head -1 || true)
