@@ -41,3 +41,4 @@ export const SERPAPI_API_KEY = readSerpApiKey();
 
 export const DIRECTIONS_API_URL = 'https://maps.googleapis.com/maps/api/directions/json';
 export const SERPAPI_DIRECTIONS_URL = 'https://serpapi.com/search.json';
+export const OSRM_ROUTING_URL = 'https://router.project-osrm.org';

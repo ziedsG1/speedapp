@@ -40,7 +40,7 @@ export default function RunScreen() {
   const [routeInfo, setRouteInfo] = useState<{
     distanceKm: number;
     durationMinutes: number;
-    source: 'serpapi' | 'directions';
+    source: 'serpapi' | 'osrm' | 'directions';
   } | null>(null);
   const [saving, setSaving] = useState(false);
   const [lastPlan, setLastPlan] = useState<{
@@ -210,7 +210,7 @@ export default function RunScreen() {
         <View style={[styles.mapBadge, { backgroundColor: colors.mapOverlay }]}>
           <Text style={styles.mapBadgeText}>
             {routeInfo
-              ? `${routeInfo.source === 'serpapi' ? 'SerpApi' : 'Google'} · ${routeInfo.distanceKm.toFixed(2)} km · ~${routeInfo.durationMinutes} min`
+              ? `${routeInfo.source === 'serpapi' ? 'SerpApi' : routeInfo.source === 'osrm' ? 'OSRM streets' : 'Google'} · ${routeInfo.distanceKm.toFixed(2)} km · ~${routeInfo.durationMinutes} min`
               : destination
                 ? 'Tap Get Street Route below'
                 : 'Tap map to choose finish point'}

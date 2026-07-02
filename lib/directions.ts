@@ -1,4 +1,5 @@
-import { DIRECTIONS_API_URL, GOOGLE_MAPS_API_KEY } from '@/constants/config';
+import { DIRECTIONS_API_URL, GOOGLE_MAPS_API_KEY, SERPAPI_API_KEY } from '@/constants/config';
+import { fetchOsrmWalkingRoute } from '@/lib/osrm-directions';
 import { fetchSerpApiWalkingRoute } from '@/lib/serpapi-directions';
 import type { Coordinate } from '@/lib/marathon';
 
@@ -23,7 +24,7 @@ export type RouteResult = {
   coordinates: Coordinate[];
   distanceKm: number;
   durationMinutes: number;
-  source: 'serpapi' | 'directions';
+  source: 'serpapi' | 'osrm' | 'directions';
 };
 
 export class DirectionsError extends Error {
@@ -80,7 +81,7 @@ function formatCoord(c: Coordinate): string {
 async function fetchGoogleWalkingRoute(
   origin: Coordinate,
   destination: Coordinate
-): Promise<{ coords: Coordinate[]; distanceM: number; durationS: number }> {
+): Promise<{ coords: Coordinate[]; distanceM: number; durationS: number; source: 'directions' }> {
   if (!GOOGLE_MAPS_API_KEY) {
     throw new DirectionsError('Google Maps API key is missing.');
   }
@@ -97,7 +98,7 @@ async function fetchGoogleWalkingRoute(
 
   if (data.status !== 'OK' || !data.routes?.length) {
     throw new DirectionsError(
-      data.error_message ?? `Directions request failed: ${data.status}`,
+      data.error_message ?? `Google Directions failed: ${data.status}`,
       data.status
     );
   }
@@ -107,46 +108,64 @@ async function fetchGoogleWalkingRoute(
   const distanceM = route.legs.reduce((sum, leg) => sum + leg.distance.value, 0);
   const durationS = route.legs.reduce((sum, leg) => sum + leg.duration.value, 0);
 
-  return { coords, distanceM, durationS };
+  return { coords, distanceM, durationS, source: 'directions' };
 }
 
-/** Walking route on streets from origin to destination (SerpApi first, Google fallback). */
+type RouteProvider = (
+  origin: Coordinate,
+  destination: Coordinate
+) => Promise<{ coords: Coordinate[]; distanceM: number; durationS: number; source: RouteResult['source'] }>;
+
+/**
+ * Street walking route: origin → destination.
+ * 1. SerpApi (if SERPAPI_API_KEY)
+ * 2. OSRM — free OpenStreetMap routing, no key
+ * 3. Google Directions (if GOOGLE_MAPS_API_KEY)
+ */
 export async function fetchWalkingRoute(
   origin: Coordinate,
   destination: Coordinate
 ): Promise<RouteResult> {
-  let lastError: Error | null = null;
+  const providers: RouteProvider[] = [];
 
-  try {
-    const serp = await fetchSerpApiWalkingRoute(origin, destination);
-    return {
-      coordinates: serp.coordinates,
-      distanceKm: serp.distanceM / 1000,
-      durationMinutes: Math.round(serp.durationS / 60),
-      source: 'serpapi',
-    };
-  } catch (err) {
-    lastError = err instanceof Error ? err : new Error(String(err));
+  if (SERPAPI_API_KEY) {
+    providers.push(async (o, d) => {
+      const result = await fetchSerpApiWalkingRoute(o, d);
+      return { ...result, coords: result.coordinates, source: 'serpapi' };
+    });
   }
 
-  try {
-    const google = await fetchGoogleWalkingRoute(origin, destination);
-    if (google.coords.length < 2) {
-      throw new DirectionsError('No street route found between these points.');
+  providers.push(async (o, d) => {
+    const result = await fetchOsrmWalkingRoute(o, d);
+    return { ...result, coords: result.coordinates, source: 'osrm' };
+  });
+
+  if (GOOGLE_MAPS_API_KEY) {
+    providers.push(fetchGoogleWalkingRoute);
+  }
+
+  let lastError: Error | null = null;
+
+  for (const provider of providers) {
+    try {
+      const result = await provider(origin, destination);
+      if (result.coords.length < 2) {
+        throw new DirectionsError('No street route found between these points.');
+      }
+      return {
+        coordinates: result.coords,
+        distanceKm: result.distanceM / 1000,
+        durationMinutes: Math.round(result.durationS / 60),
+        source: result.source,
+      };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
     }
-    return {
-      coordinates: google.coords,
-      distanceKm: google.distanceM / 1000,
-      durationMinutes: Math.round(google.durationS / 60),
-      source: 'directions',
-    };
-  } catch (err) {
-    lastError = err instanceof Error ? err : new Error(String(err));
   }
 
   throw lastError instanceof DirectionsError
     ? lastError
     : new DirectionsError(
-        lastError?.message ?? 'Could not fetch a walking route. Add SERPAPI_API_KEY or GOOGLE_MAPS_API_KEY.'
+        lastError?.message ?? 'Could not fetch a walking route. Check your internet connection.'
       );
 }

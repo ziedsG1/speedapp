@@ -83,6 +83,11 @@ export default function RunDetailScreen() {
                   ? `${run.routeDistanceKm.toFixed(1)} km`
                   : `${run.distanceKm} km`}
               </Text>
+              {run.routeSource === 'osrm' && (
+                <Text style={[styles.routeSource, { color: colors.textSecondary }]}>
+                  OSRM street route (free)
+                </Text>
+              )}
               {run.routeSource === 'serpapi' && (
                 <Text style={[styles.routeSource, { color: colors.textSecondary }]}>
                   SerpApi street route
