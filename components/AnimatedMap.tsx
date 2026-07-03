@@ -6,6 +6,7 @@ import MapView, {
   PROVIDER_GOOGLE,
   type Region,
 } from 'react-native-maps';
+import { SymbolView } from 'expo-symbols';
 import RunnerMarker from '@/components/RunnerMarker';
 import { customMapStyle } from '@/constants/mapStyle';
 import type { Coordinate } from '@/lib/marathon';
@@ -28,6 +29,7 @@ type AnimatedMapProps = {
   animateOnMount?: boolean;
   interactive?: boolean;
   selectionEnabled?: boolean;
+  highlightEndpoints?: boolean;
   onMapPress?: (coordinate: Coordinate) => void;
   style?: object;
 };
@@ -52,6 +54,7 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
       animateOnMount = true,
       interactive = true,
       selectionEnabled = false,
+      highlightEndpoints = false,
       onMapPress,
       style,
     },
@@ -180,8 +183,28 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
     const animatedRoute = route.slice(0, animatedIndex + 1);
     const startPoint = origin ?? route[0];
     const endPoint = destination ?? route[route.length - 1];
-    const showRunnerAtStart = routeReady && !isRunning && startPoint;
+    const showRunnerAtStart = routeReady && !isRunning && startPoint && !highlightEndpoints;
     const showRunnerLive = isRunning && runnerPosition;
+
+    const renderEndpoint = (point: Coordinate, kind: 'start' | 'finish') => {
+      const isStart = kind === 'start';
+      return (
+        <Marker coordinate={point} anchor={{ x: 0.5, y: 0.5 }} zIndex={10}>
+          <View style={[styles.endpoint, isStart ? styles.endpointStart : styles.endpointFinish]}>
+            <SymbolView
+              name={{
+                ios: isStart ? 'figure.stand' : 'flag.checkered',
+                android: isStart ? 'person_pin_circle' : 'flag',
+                web: isStart ? 'person_pin_circle' : 'flag',
+              }}
+              size={18}
+              tintColor="#FFF"
+            />
+            <View style={[styles.endpointDot, isStart ? styles.endpointDotStart : styles.endpointDotFinish]} />
+          </View>
+        </Marker>
+      );
+    };
 
     return (
       <View style={[styles.container, style]}>
@@ -202,7 +225,10 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
           mapType="standard"
           onPress={handlePress}
         >
-          {startPoint && !showRunnerAtStart && (
+          {highlightEndpoints && startPoint && renderEndpoint(startPoint, 'start')}
+          {highlightEndpoints && endPoint && renderEndpoint(endPoint, 'finish')}
+
+          {startPoint && !showRunnerAtStart && !highlightEndpoints && (
             <Marker coordinate={startPoint} title="Start" description="You are here" pinColor="#10B981" />
           )}
 
@@ -215,13 +241,14 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
           )}
 
           {endPoint &&
+            !highlightEndpoints &&
             (!startPoint ||
               endPoint.latitude !== startPoint.latitude ||
               endPoint.longitude !== startPoint.longitude) && (
               <Marker coordinate={endPoint} title="Finish" description="Your destination" pinColor="#EF4444" />
             )}
 
-          {route.length > 1 && (
+          {route.length > 1 && !highlightEndpoints && (
             <Polyline
               coordinates={route}
               strokeColor="rgba(255, 107, 53, 0.2)"
@@ -229,6 +256,25 @@ const AnimatedMap = forwardRef<AnimatedMapHandle, AnimatedMapProps>(
               lineCap="round"
               lineJoin="round"
             />
+          )}
+
+          {highlightEndpoints && route.length > 1 && (
+            <>
+              <Polyline
+                coordinates={route}
+                strokeColor="rgba(16, 185, 129, 0.25)"
+                strokeWidth={10}
+                lineCap="round"
+                lineJoin="round"
+              />
+              <Polyline
+                coordinates={route}
+                strokeColor="#10B981"
+                strokeWidth={5}
+                lineCap="round"
+                lineJoin="round"
+              />
+            </>
           )}
 
           {isRunning && traveledPath.length > 1 && (
@@ -283,5 +329,34 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     height: '100%',
+  },
+  endpoint: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+  },
+  endpointStart: {
+    backgroundColor: 'rgba(16, 185, 129, 0.9)',
+    borderColor: '#6EE7B7',
+  },
+  endpointFinish: {
+    backgroundColor: 'rgba(239, 68, 68, 0.9)',
+    borderColor: '#FCA5A5',
+  },
+  endpointDot: {
+    position: 'absolute',
+    bottom: -4,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  endpointDotStart: {
+    backgroundColor: '#10B981',
+  },
+  endpointDotFinish: {
+    backgroundColor: '#EF4444',
   },
 });

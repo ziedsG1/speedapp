@@ -13,6 +13,11 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { MARATHON_LABELS } from '@/lib/marathon';
 import { getRunById, type SavedRun } from '@/lib/storage';
 
+function typeLabel(run: SavedRun): string {
+  if (run.marathonType === 'custom') return 'Custom';
+  return MARATHON_LABELS[run.marathonType];
+}
+
 export default function RunDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const colorScheme = useColorScheme() ?? 'dark';
@@ -39,11 +44,13 @@ export default function RunDetailScreen() {
     year: 'numeric',
   });
 
+  const finishPoint = run.destination ?? run.route[run.route.length - 1];
+
   return (
     <>
       <Stack.Screen
         options={{
-          title: MARATHON_LABELS[run.marathonType],
+          title: typeLabel(run),
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.text,
         }}
@@ -58,9 +65,10 @@ export default function RunDetailScreen() {
           <View style={styles.mapWrap}>
             <AnimatedMap
               ref={mapRef}
-              origin={run.route[0]}
-              destination={run.destination ?? run.route[run.route.length - 1]}
+              origin={run.startPoint}
+              destination={finishPoint}
               route={run.route}
+              highlightEndpoints
               animateOnMount
               interactive={false}
             />
@@ -71,33 +79,36 @@ export default function RunDetailScreen() {
           <Text style={[styles.runName, { color: colors.text }]}>{run.name}</Text>
           <Text style={[styles.date, { color: colors.textSecondary }]}>{date}</Text>
 
+          <View style={styles.endpointLegend}>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, styles.legendStart]} />
+              <Text style={[styles.legendText, { color: colors.text }]}>Start point</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, styles.legendFinish]} />
+              <Text style={[styles.legendText, { color: colors.text }]}>Finish point</Text>
+            </View>
+          </View>
+
           <View style={styles.statsGrid}>
-            <View style={[styles.statBox, { backgroundColor: colors.background }]}>
-              <Text style={[styles.statBoxLabel, { color: colors.textSecondary }]}>Finish Time</Text>
-              <Text style={[styles.statBoxValue, { color: Colors.accent }]}>{run.finishTime}</Text>
+            <View style={[styles.statBox, styles.statBoxHighlight, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
+              <Text style={[styles.statBoxLabel, { color: colors.textSecondary }]}>Km Achieved</Text>
+              <Text style={[styles.statBoxValue, { color: '#10B981' }]}>
+                {run.achievedDistanceKm.toFixed(2)} km
+              </Text>
+              <Text style={[styles.statSub, { color: colors.textSecondary }]}>
+                goal {run.plannedDistanceKm.toFixed(1)} km
+              </Text>
+            </View>
+            <View style={[styles.statBox, styles.statBoxHighlight, { backgroundColor: 'rgba(255, 107, 53, 0.12)' }]}>
+              <Text style={[styles.statBoxLabel, { color: colors.textSecondary }]}>Steps</Text>
+              <Text style={[styles.statBoxValue, { color: Colors.accent }]}>
+                {run.steps.toLocaleString()}
+              </Text>
             </View>
             <View style={[styles.statBox, { backgroundColor: colors.background }]}>
-              <Text style={[styles.statBoxLabel, { color: colors.textSecondary }]}>Distance</Text>
-              <Text style={[styles.statBoxValue, { color: colors.text }]}>
-                {run.routeDistanceKm
-                  ? `${run.routeDistanceKm.toFixed(1)} km`
-                  : `${run.distanceKm} km`}
-              </Text>
-              {run.routeSource === 'osrm' && (
-                <Text style={[styles.routeSource, { color: colors.textSecondary }]}>
-                  OSRM street route (free)
-                </Text>
-              )}
-              {run.routeSource === 'serpapi' && (
-                <Text style={[styles.routeSource, { color: colors.textSecondary }]}>
-                  SerpApi street route
-                </Text>
-              )}
-              {run.routeSource === 'directions' && (
-                <Text style={[styles.routeSource, { color: colors.textSecondary }]}>
-                  Google Directions
-                </Text>
-              )}
+              <Text style={[styles.statBoxLabel, { color: colors.textSecondary }]}>Finish Time</Text>
+              <Text style={[styles.statBoxValue, { color: colors.text }]}>{run.finishTime}</Text>
             </View>
             <View style={[styles.statBox, { backgroundColor: colors.background }]}>
               <Text style={[styles.statBoxLabel, { color: colors.textSecondary }]}>Pace</Text>
@@ -105,7 +116,7 @@ export default function RunDetailScreen() {
                 {Math.floor(run.paceMinPerKm)}:{String(Math.round((run.paceMinPerKm % 1) * 60)).padStart(2, '0')}/km
               </Text>
             </View>
-            {run.calories && (
+            {run.calories != null && (
               <View style={[styles.statBox, { backgroundColor: colors.background }]}>
                 <Text style={[styles.statBoxLabel, { color: colors.textSecondary }]}>Calories</Text>
                 <Text style={[styles.statBoxValue, { color: colors.text }]}>~{run.calories}</Text>
@@ -114,22 +125,12 @@ export default function RunDetailScreen() {
           </View>
         </View>
 
-        <View style={[styles.splitsCard, { backgroundColor: colors.card }]}>
-          <Text style={[styles.splitsTitle, { color: colors.text }]}>Split Times</Text>
-          {run.splits.map((split) => (
-            <View key={split.km} style={[styles.splitRow, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.splitKm, { color: colors.text }]}>{split.km} km</Text>
-              <Text style={[styles.splitTime, { color: Colors.accent }]}>{split.cumulativeTime}</Text>
-              <Text style={[styles.splitPace, { color: colors.textSecondary }]}>{split.pace}/km</Text>
-            </View>
-          ))}
-        </View>
-
         <View style={styles.mapWrap}>
           <AnimatedMap
-            origin={run.route[0]}
-            destination={run.destination ?? run.route[run.route.length - 1]}
+            origin={run.startPoint}
+            destination={finishPoint}
             route={run.route}
+            highlightEndpoints
             animateOnMount
             interactive
           />
@@ -162,6 +163,34 @@ const styles = StyleSheet.create({
   },
   runName: { fontSize: 22, fontWeight: '800' },
   date: { fontSize: 13, marginTop: 4, marginBottom: 16 },
+  endpointLegend: {
+    flexDirection: 'row',
+    gap: 20,
+    marginBottom: 16,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  legendDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+  },
+  legendStart: {
+    backgroundColor: '#10B981',
+    borderColor: '#6EE7B7',
+  },
+  legendFinish: {
+    backgroundColor: '#EF4444',
+    borderColor: '#FCA5A5',
+  },
+  legendText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -171,6 +200,10 @@ const styles = StyleSheet.create({
     width: '47%',
     borderRadius: 12,
     padding: 14,
+  },
+  statBoxHighlight: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   statBoxLabel: {
     fontSize: 11,
@@ -182,27 +215,8 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginTop: 4,
   },
-  routeSource: {
-    fontSize: 10,
+  statSub: {
+    fontSize: 11,
     marginTop: 2,
   },
-  splitsCard: {
-    marginHorizontal: 20,
-    borderRadius: 18,
-    padding: 20,
-  },
-  splitsTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  splitRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  splitKm: { fontSize: 14, fontWeight: '500', width: 60 },
-  splitTime: { fontSize: 14, fontWeight: '700', flex: 1, textAlign: 'center' },
-  splitPace: { fontSize: 13, width: 70, textAlign: 'right' },
 });

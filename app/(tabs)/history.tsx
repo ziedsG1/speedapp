@@ -16,6 +16,11 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { MARATHON_LABELS } from '@/lib/marathon';
 import { deleteRun, getRunHistory, type SavedRun } from '@/lib/storage';
 
+function typeLabel(run: SavedRun): string {
+  if (run.marathonType === 'custom') return 'Custom';
+  return MARATHON_LABELS[run.marathonType];
+}
+
 function RunCard({
   run,
   onPress,
@@ -49,7 +54,7 @@ function RunCard({
       <View style={styles.cardContent}>
         <View style={styles.cardHeader}>
           <View style={styles.typeBadge}>
-            <Text style={styles.typeBadgeText}>{MARATHON_LABELS[run.marathonType]}</Text>
+            <Text style={styles.typeBadgeText}>{typeLabel(run)}</Text>
           </View>
           <Pressable onPress={onDelete} hitSlop={12}>
             <SymbolView name={{ ios: 'trash', android: 'delete', web: 'delete' }} size={18} tintColor="#EF4444" />
@@ -66,14 +71,30 @@ function RunCard({
             <Text style={[styles.statValue, { color: Colors.accent }]}>{run.finishTime}</Text>
           </View>
           <View style={styles.stat}>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Distance</Text>
-            <Text style={[styles.statValue, { color: colors.text }]}>{run.distanceKm} km</Text>
+            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Km achieved</Text>
+            <Text style={[styles.statValue, { color: '#10B981' }]}>
+              {run.achievedDistanceKm.toFixed(1)} km
+            </Text>
+            <Text style={[styles.statSub, { color: colors.textSecondary }]}>
+              goal {run.plannedDistanceKm.toFixed(1)} km
+            </Text>
           </View>
           <View style={styles.stat}>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Pace</Text>
+            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Steps</Text>
             <Text style={[styles.statValue, { color: colors.text }]}>
-              {Math.floor(run.paceMinPerKm)}:{String(Math.round((run.paceMinPerKm % 1) * 60)).padStart(2, '0')}
+              {run.steps.toLocaleString()}
             </Text>
+          </View>
+        </View>
+
+        <View style={styles.endpointRow}>
+          <View style={styles.endpointChip}>
+            <View style={[styles.dot, styles.dotStart]} />
+            <Text style={[styles.endpointText, { color: colors.textSecondary }]}>Start</Text>
+          </View>
+          <View style={styles.endpointChip}>
+            <View style={[styles.dot, styles.dotFinish]} />
+            <Text style={[styles.endpointText, { color: colors.textSecondary }]}>Finish</Text>
           </View>
         </View>
 
@@ -141,7 +162,7 @@ export default function HistoryScreen() {
             <SymbolView name={{ ios: 'book.closed', android: 'menu_book', web: 'menu_book' }} size={48} tintColor={colors.textSecondary} />
             <Text style={[styles.emptyTitle, { color: colors.text }]}>No runs yet</Text>
             <Text style={[styles.emptySub, { color: colors.textSecondary }]}>
-              Plan a marathon and save it to build your history.
+              Plan a run and save it to build your history.
             </Text>
           </View>
         }
@@ -215,11 +236,30 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  stat: { alignItems: 'center' },
+  stat: { alignItems: 'center', flex: 1 },
   statLabel: { fontSize: 11, textTransform: 'uppercase' },
   statValue: { fontSize: 16, fontWeight: '700', marginTop: 2 },
+  statSub: { fontSize: 10, marginTop: 2 },
+  endpointRow: {
+    flexDirection: 'row',
+    gap: 16,
+    marginBottom: 8,
+  },
+  endpointChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  dotStart: { backgroundColor: '#10B981' },
+  dotFinish: { backgroundColor: '#EF4444' },
+  endpointText: { fontSize: 12, fontWeight: '600' },
   date: { fontSize: 12 },
   empty: {
     alignItems: 'center',

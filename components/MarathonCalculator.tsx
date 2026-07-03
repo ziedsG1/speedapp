@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -11,45 +10,55 @@ import { Text } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import {
+  MARATHON_DISTANCES,
   MARATHON_LABELS,
   calculateFinishTime,
   estimateCalories,
-  generateSplits,
+  secondsToTime,
   type MarathonType,
 } from '@/lib/marathon';
+import { estimateStepsFromKm } from '@/lib/steps';
 
 type Props = {
-  onCalculate: (data: {
-    marathonType: MarathonType;
+  onPlanRoute: (data: {
+    marathonType: MarathonType | 'custom';
+    targetKm: number;
     paceMinPerKm: number;
   }) => void;
   onStartRunning?: () => void;
   onStopRunning?: () => void;
   userAge?: number;
   loading?: boolean;
-  destinationSelected?: boolean;
-  plannedDistanceKm?: number | null;
   routeReady?: boolean;
   isRunning?: boolean;
   rerouting?: boolean;
+  targetDistanceKm?: number;
+  routeDistanceKm?: number | null;
+  elapsedSeconds?: number;
+  stepCount?: number;
+  achievedDistanceKm?: number;
 };
 
 export default function MarathonCalculator({
-  onCalculate,
+  onPlanRoute,
   onStartRunning,
   onStopRunning,
   userAge,
   loading = false,
-  destinationSelected = false,
-  plannedDistanceKm = null,
   routeReady = false,
   isRunning = false,
   rerouting = false,
+  targetDistanceKm = 5,
+  routeDistanceKm = null,
+  elapsedSeconds = 0,
+  stepCount = 0,
+  achievedDistanceKm = 0,
 }: Props) {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = Colors[colorScheme];
 
-  const [marathonType, setMarathonType] = useState<MarathonType>('full');
+  const [marathonType, setMarathonType] = useState<MarathonType | 'custom'>('5k');
+  const [customKm, setCustomKm] = useState('5');
   const [paceMinutes, setPaceMinutes] = useState('5');
   const [paceSeconds, setPaceSeconds] = useState('30');
 
@@ -59,23 +68,45 @@ export default function MarathonCalculator({
     return mins + secs / 60;
   }, [paceMinutes, paceSeconds]);
 
-  const previewDistance = plannedDistanceKm ?? null;
+  const activeTargetKm = useMemo(() => {
+    if (marathonType === 'custom') {
+      const parsed = parseFloat(customKm.replace(',', '.'));
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    }
+    return MARATHON_DISTANCES[marathonType];
+  }, [marathonType, customKm]);
 
-  const finishTime = useMemo(() => {
-    if (!previewDistance) return '--:--';
-    return calculateFinishTime(previewDistance, paceMinPerKm);
-  }, [previewDistance, paceMinPerKm]);
-
-  const splits = useMemo(() => {
-    if (!previewDistance) return [];
-    return generateSplits(previewDistance, paceMinPerKm);
-  }, [previewDistance, paceMinPerKm]);
+  const targetTime = useMemo(() => {
+    if (!activeTargetKm) return '--:--';
+    return calculateFinishTime(activeTargetKm, paceMinPerKm);
+  }, [activeTargetKm, paceMinPerKm]);
 
   const weightKg = userAge ? Math.max(50, 80 - (userAge - 25) * 0.3) : 70;
   const calories = useMemo(() => {
-    if (!previewDistance) return null;
-    return estimateCalories(previewDistance, weightKg, paceMinPerKm);
-  }, [previewDistance, weightKg, paceMinPerKm]);
+    const km = isRunning ? achievedDistanceKm : activeTargetKm;
+    if (!km) return null;
+    return estimateCalories(km, weightKg, paceMinPerKm);
+  }, [activeTargetKm, achievedDistanceKm, isRunning, weightKg, paceMinPerKm]);
+
+  const previewSteps = isRunning
+    ? stepCount
+    : estimateStepsFromKm(routeDistanceKm ?? activeTargetKm);
+
+  const handleSelectType = (type: MarathonType | 'custom') => {
+    setMarathonType(type);
+    const km = type === 'custom' ? parseFloat(customKm.replace(',', '.')) : MARATHON_DISTANCES[type];
+    if (km > 0 && !isRunning) {
+      onPlanRoute({ marathonType: type, targetKm: km, paceMinPerKm });
+    }
+  };
+
+  const handleCustomKmBlur = () => {
+    if (marathonType !== 'custom' || isRunning) return;
+    const km = parseFloat(customKm.replace(',', '.'));
+    if (km > 0) {
+      onPlanRoute({ marathonType: 'custom', targetKm: km, paceMinPerKm });
+    }
+  };
 
   const handlePrimaryAction = () => {
     if (isRunning) {
@@ -86,19 +117,23 @@ export default function MarathonCalculator({
       onStartRunning?.();
       return;
     }
-    onCalculate({ marathonType, paceMinPerKm });
+    if (activeTargetKm > 0) {
+      onPlanRoute({ marathonType, targetKm: activeTargetKm, paceMinPerKm });
+    }
   };
 
-  const types: MarathonType[] = ['5k', '10k', 'half', 'full'];
-  const canPlan = destinationSelected && !loading && !isRunning;
+  const types: (MarathonType | 'custom')[] = ['5k', '10k', 'half', 'full', 'custom'];
   const canStart = routeReady && !loading && !rerouting;
-  const buttonEnabled = isRunning ? true : routeReady ? canStart : canPlan;
+  const buttonEnabled = isRunning ? true : routeReady ? canStart : activeTargetKm > 0 && !loading;
 
   const buttonLabel = isRunning
     ? 'Stop Running'
     : routeReady
       ? 'Start Running'
-      : 'Get Street Route';
+      : 'Plan Street Route';
+
+  const timeLabel = isRunning ? 'Elapsed' : 'Target Time';
+  const timeValue = isRunning ? secondsToTime(elapsedSeconds) : targetTime;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.card }]}>
@@ -107,7 +142,8 @@ export default function MarathonCalculator({
         {types.map((type) => (
           <Pressable
             key={type}
-            onPress={() => setMarathonType(type)}
+            onPress={() => handleSelectType(type)}
+            disabled={loading || isRunning}
             style={[
               styles.typeChip,
               {
@@ -123,11 +159,27 @@ export default function MarathonCalculator({
                 { color: marathonType === type ? '#FFF' : colors.textSecondary },
               ]}
             >
-              {MARATHON_LABELS[type]}
+              {type === 'custom' ? 'Custom' : MARATHON_LABELS[type]}
             </Text>
           </Pressable>
         ))}
       </View>
+
+      {marathonType === 'custom' && (
+        <View style={[styles.kmInputWrap, { borderColor: colors.border, backgroundColor: colors.background }]}>
+          <TextInput
+            style={[styles.kmInput, { color: colors.text }]}
+            value={customKm}
+            onChangeText={setCustomKm}
+            onBlur={handleCustomKmBlur}
+            keyboardType="decimal-pad"
+            placeholder="e.g. 7.5"
+            placeholderTextColor={colors.textSecondary}
+            editable={!isRunning && !loading}
+          />
+          <Text style={[styles.kmLabel, { color: colors.textSecondary }]}>km goal</Text>
+        </View>
+      )}
 
       <Text style={styles.sectionTitle}>Target Pace (min/km)</Text>
       <View style={styles.paceRow}>
@@ -140,6 +192,7 @@ export default function MarathonCalculator({
             maxLength={2}
             placeholder="5"
             placeholderTextColor={colors.textSecondary}
+            editable={!isRunning}
           />
           <Text style={[styles.paceLabel, { color: colors.textSecondary }]}>min</Text>
         </View>
@@ -153,6 +206,7 @@ export default function MarathonCalculator({
             maxLength={2}
             placeholder="30"
             placeholderTextColor={colors.textSecondary}
+            editable={!isRunning}
           />
           <Text style={[styles.paceLabel, { color: colors.textSecondary }]}>sec</Text>
         </View>
@@ -160,45 +214,46 @@ export default function MarathonCalculator({
 
       <View style={[styles.preview, { backgroundColor: colors.background }]}>
         <View style={styles.previewItem}>
-          <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>Street route</Text>
+          <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>
+            {isRunning ? 'Km achieved' : 'Street route'}
+          </Text>
           <Text style={[styles.previewValue, { color: colors.text }]}>
-            {previewDistance != null ? `${previewDistance.toFixed(2)} km` : 'Tap map'}
+            {isRunning
+              ? `${achievedDistanceKm.toFixed(2)} km`
+              : routeDistanceKm != null
+                ? `${routeDistanceKm.toFixed(2)} km`
+                : activeTargetKm
+                  ? `${activeTargetKm} km goal`
+                  : '--'}
           </Text>
         </View>
         <View style={styles.previewItem}>
-          <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>Finish Time</Text>
-          <Text style={[styles.previewValue, { color: Colors.accent }]}>{finishTime}</Text>
+          <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>{timeLabel}</Text>
+          <Text style={[styles.previewValue, { color: Colors.accent }]}>{timeValue}</Text>
         </View>
         <View style={styles.previewItem}>
-          <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>Calories</Text>
+          <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>Steps</Text>
           <Text style={[styles.previewValue, { color: colors.text }]}>
-            {calories != null ? `~${calories}` : '--'}
+            {previewSteps > 0 ? previewSteps.toLocaleString() : '--'}
           </Text>
         </View>
       </View>
 
-      {splits.length > 0 && (
-        <ScrollView style={styles.splitsScroll} nestedScrollEnabled showsVerticalScrollIndicator={false}>
-          <Text style={[styles.splitsTitle, { color: colors.textSecondary }]}>Split Times</Text>
-          {splits.map((split) => (
-            <View key={split.km} style={[styles.splitRow, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.splitKm, { color: colors.text }]}>{split.km} km</Text>
-              <Text style={[styles.splitTime, { color: Colors.accent }]}>{split.cumulativeTime}</Text>
-              <Text style={[styles.splitPace, { color: colors.textSecondary }]}>{split.pace}/km</Text>
-            </View>
-          ))}
-        </ScrollView>
-      )}
-
-      {!destinationSelected && (
-        <Text style={[styles.hint, { color: colors.textSecondary }]}>
-          Tap the map to choose your finish point. Route starts from your current location.
+      {calories != null && (
+        <Text style={[styles.calories, { color: colors.textSecondary }]}>
+          Calories {isRunning ? 'so far' : 'estimate'}: ~{calories}
         </Text>
       )}
 
       {isRunning && (
         <Text style={[styles.hint, { color: Colors.accent }]}>
-          Follow the orange route. Your green line grows as you move. The route updates if you turn onto another street.
+          Green line = your steps. Route updates if you turn onto another street.
+        </Text>
+      )}
+
+      {!routeReady && !loading && (
+        <Text style={[styles.hint, { color: colors.textSecondary }]}>
+          Tap 5K, 10K, or Custom to auto-create a street route from your location.
         </Text>
       )}
 
@@ -215,7 +270,7 @@ export default function MarathonCalculator({
           <View style={styles.loadingRow}>
             <ActivityIndicator color="#FFF" size="small" />
             <Text style={styles.buttonText}>
-              {rerouting ? 'Updating route...' : 'Loading street route...'}
+              {rerouting ? 'Updating route...' : 'Planning street route...'}
             </Text>
           </View>
         ) : (
@@ -252,6 +307,24 @@ const styles = StyleSheet.create({
   },
   typeChipText: {
     fontSize: 13,
+    fontWeight: '600',
+  },
+  kmInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  kmInput: {
+    flex: 1,
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  kmLabel: {
+    fontSize: 14,
     fontWeight: '600',
   },
   paceRow: {
@@ -302,35 +375,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  splitsScroll: {
-    maxHeight: 120,
-  },
-  splitsTitle: {
-    fontSize: 12,
-    marginBottom: 6,
-    textTransform: 'uppercase',
-  },
-  splitRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  splitKm: {
-    fontSize: 14,
-    fontWeight: '500',
-    width: 60,
-  },
-  splitTime: {
-    fontSize: 14,
-    fontWeight: '700',
-    flex: 1,
-    textAlign: 'center',
-  },
-  splitPace: {
+  calories: {
     fontSize: 13,
-    width: 70,
-    textAlign: 'right',
+    textAlign: 'center',
   },
   hint: {
     fontSize: 13,
